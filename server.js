@@ -91,18 +91,13 @@ function startGameLoop(code){
     const room=rooms[code];
     if(!room)return;
     if(room.gameLoop)clearInterval(room.gameLoop);
-    var tick=0;
-    room.gameLoop=setInterval(()=>{
+        room.gameLoop=setInterval(()=>{
         if(!rooms[code]){clearInterval(room.gameLoop);return}
         hostPhysics(code);
-        tick++;
-        // Her 2 tickte bir state gönder (30fps)
-        if(tick%2===0){
-            const state=buildState(code);
-            if(state)io.to(code).emit('state',state);
-        }
+        // Her frame state gönder (60fps) - lag için en iyi
+        const state=buildState(code);
+        if(state)io.to(code).emit('state',state);
     },FDT);
-}
 
 function stopGameLoop(code){
     const room=rooms[code];
@@ -170,23 +165,26 @@ function hostPhysics(code){
         else{pp.kickHeld=0;pp.kick=false}
         if(pp.pCD>0)pp.pCD--;
                 // Saha sınırları - kale içine girebilir
+                // Kale içine serbestçe girebilir
+        if(pp.y<PR){pp.y=PR;pp.vy=0;}
+        if(pp.y>FH-PR){pp.y=FH-PR;pp.vy=0;}
+        // Sol kale
         if(pp.x<PR){
-            // Sol kale bölgesi - kaleye girmeye izin ver
-            if(!(pp.y>gT-PR&&pp.y<gB+PR)){
+            if(pp.y>gT&&pp.y<gB){
+                // Kale içinde - arka duvara kadar gidebilir
+                if(pp.x<-GD+PR)pp.x=-GD+PR;
+            } else {
                 pp.x=PR;pp.vx=0;
-            } else {
-                // Kale içindeyse arka duvardan geç
-                pp.x=clp(pp.x,-GD+PR,FW-PR);
             }
         }
+        // Sağ kale
         if(pp.x>FW-PR){
-            if(!(pp.y>gT-PR&&pp.y<gB+PR)){
-                pp.x=FW-PR;pp.vx=0;
+            if(pp.y>gT&&pp.y<gB){
+                if(pp.x>FW+GD-PR)pp.x=FW+GD-PR;
             } else {
-                pp.x=clp(pp.x,PR,FW+GD-PR);
+                pp.x=FW-PR;pp.vx=0;
             }
         }
-        pp.y=clp(pp.y,PR,FH-PR);
     }
 
     // OYUNCU-OYUNCU ÇARPIŞMA
@@ -544,4 +542,5 @@ function getLobbyData(code){
 const PORT=process.env.PORT||3000;
 
 server.listen(PORT,()=>console.log('Server port:',PORT));
+
 
