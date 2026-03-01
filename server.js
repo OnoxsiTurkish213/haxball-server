@@ -91,12 +91,16 @@ function startGameLoop(code){
     const room=rooms[code];
     if(!room)return;
     if(room.gameLoop)clearInterval(room.gameLoop);
+    var tick=0;
     room.gameLoop=setInterval(()=>{
         if(!rooms[code]){clearInterval(room.gameLoop);return}
         hostPhysics(code);
-        // Tüm clientlara state gönder
-        const state=buildState(code);
-        if(state)io.to(code).emit('state',state);
+        tick++;
+        // Her 2 tickte bir state gönder (30fps)
+        if(tick%2===0){
+            const state=buildState(code);
+            if(state)io.to(code).emit('state',state);
+        }
     },FDT);
 }
 
@@ -512,4 +516,5 @@ function getLobbyData(code){
 }
 
 const PORT=process.env.PORT||3000;
+
 server.listen(PORT,()=>console.log('Server port:',PORT));
