@@ -25,9 +25,9 @@ const MAPS={
 };
 
 // Fizik sabitleri
-const PR=19,BR=11,KF=5.5,PKF=17,PSP=6.5;
-const PA=.28,PMS=2.8,BMS=10,BD=.62,PBD=.24,BPF=.32,PSR=6;
-const KICK_HOLD_MAX=60,PCD=2700,RCF=5;
+const PR=19,BR=11,KF=7,PKF=22,PSP=7;
+const PA=.28,PMS=2.8,BMS=14,BD=.62,PBD=.24,BPF=.32,PSR=4;
+const KICK_HOLD_MAX=60,PCD=2700,RCF=8;
 const FDT=1000/60;
 const MDR=180;
 
@@ -169,7 +169,24 @@ function hostPhysics(code){
         if(pp.iK){if(pp.kickHeld<KICK_HOLD_MAX)pp.kickHeld++;pp.kick=true}
         else{pp.kickHeld=0;pp.kick=false}
         if(pp.pCD>0)pp.pCD--;
-        pp.x=clp(pp.x,PR,FW-PR);pp.y=clp(pp.y,PR,FH-PR);
+                // Saha sınırları - kale içine girebilir
+        if(pp.x<PR){
+            // Sol kale bölgesi - kaleye girmeye izin ver
+            if(!(pp.y>gT-PR&&pp.y<gB+PR)){
+                pp.x=PR;pp.vx=0;
+            } else {
+                // Kale içindeyse arka duvardan geç
+                pp.x=clp(pp.x,-GD+PR,FW-PR);
+            }
+        }
+        if(pp.x>FW-PR){
+            if(!(pp.y>gT-PR&&pp.y<gB+PR)){
+                pp.x=FW-PR;pp.vx=0;
+            } else {
+                pp.x=clp(pp.x,PR,FW+GD-PR);
+            }
+        }
+        pp.y=clp(pp.y,PR,FH-PR);
     }
 
     // OYUNCU-OYUNCU ÇARPIŞMA
@@ -243,16 +260,25 @@ function hostPhysics(code){
     // SINIRLAR & GOL
     if(B.y-BR<0){B.y=BR;if(B.vy<0)B.vy=-B.vy*BD}
     if(B.y+BR>FH){B.y=FH-BR;if(B.vy>0)B.vy=-B.vy*BD}
-    if(B.x-BR<0){
-        if(B.y>gT&&B.y<gB){if(B.x-BR<-GD){handleGoal(code,'blue');return}}
-        else{B.x=BR;if(B.vx<0)B.vx=-B.vx*BD}
+        if(B.x-BR<0){
+        if(B.y>gT&&B.y<gB){
+            // Kale içinde - gol çizgisi kale direğinin tam arkası
+            if(B.x+BR<-GD+BR){handleGoal(code,'blue');return}
+            // Kale içinde serbestçe hareket et
+        } else {
+            B.x=BR;if(B.vx<0)B.vx=-B.vx*BD;
+        }
     }
     if(B.x+BR>FW){
-        if(B.y>gT&&B.y<gB){if(B.x+BR>FW+GD){handleGoal(code,'red');return}}
-        else{B.x=FW-BR;if(B.vx>0)B.vx=-B.vx*BD}
+        if(B.y>gT&&B.y<gB){
+            if(B.x-BR>FW+GD-BR){handleGoal(code,'red');return}
+        } else {
+            B.x=FW-BR;if(B.vx>0)B.vx=-B.vx*BD;
+        }
     }
-    if(B.x<-GD){B.x=-GD+BR;if(B.vx<0)B.vx=Math.abs(B.vx)*BD}
-    if(B.x>FW+GD){B.x=FW+GD-BR;if(B.vx>0)B.vx=-Math.abs(B.vx)*BD}
+    // Kale arka duvarı
+    if(B.x<-GD){B.x=-GD+BR;B.vx=Math.abs(B.vx)*BD}
+    if(B.x>FW+GD){B.x=FW+GD-BR;B.vx=-Math.abs(B.vx)*BD}
 }
 
 function handleGoal(code,team){
@@ -518,3 +544,4 @@ function getLobbyData(code){
 const PORT=process.env.PORT||3000;
 
 server.listen(PORT,()=>console.log('Server port:',PORT));
+
