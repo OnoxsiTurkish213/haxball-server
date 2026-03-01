@@ -110,11 +110,27 @@ function buildState(code){
     const pOut={};
     for(const[id,p] of Object.entries(room.players)){
         if(p.online===false)continue;
-        pOut[id]={x:+p.x.toFixed(1),y:+p.y.toFixed(1),vx:+p.vx.toFixed(2),vy:+p.vy.toFixed(2),kick:p.kick||false,team:p.team,pos:p.pos||'',name:p.name,pCD:p.pCD||0};
+        pOut[id]={
+            x:+p.x.toFixed(2),
+            y:+p.y.toFixed(2),
+            vx:+p.vx.toFixed(3),
+            vy:+p.vy.toFixed(3),
+            kick:p.kick||false,
+            team:p.team,
+            pos:p.pos||'',
+            name:p.name,
+            pCD:p.pCD||0
+        };
     }
     return{
         players:pOut,
-        ball:{x:+room.ball.x.toFixed(1),y:+room.ball.y.toFixed(1),vx:+room.ball.vx.toFixed(2),vy:+room.ball.vy.toFixed(2),fire:room.ball.fire},
+        ball:{
+            x:+room.ball.x.toFixed(2),
+            y:+room.ball.y.toFixed(2),
+            vx:+room.ball.vx.toFixed(3),
+            vy:+room.ball.vy.toFixed(3),
+            fire:room.ball.fire
+        },
         match:{...room.match},
         goalFreeze:room.goalFreeze
     };
@@ -211,9 +227,10 @@ function hostPhysics(code){
     if(bsp>maxB){B.vx=(B.vx/bsp)*maxB;B.vy=(B.vy/bsp)*maxB}
 
     // OYUNCU-TOP ÇARPIŞMA
-    for(const[pid,bp] of acts){
+        for(const[pid,bp] of acts){
         const bd=dst(bp.x,bp.y,B.x,B.y);
-        const activeRange=PR+BR+(bp.kick?2:0);
+        // Çarpışma mesafesi tam temas noktası
+        const activeRange=PR+BR;
         if(bd<activeRange&&bd>.001){
             const bnx=(B.x-bp.x)/bd,bny=(B.y-bp.y)/bd;
             const minD=PR+BR;
@@ -542,5 +559,6 @@ function getLobbyData(code){
 const PORT=process.env.PORT||3000;
 
 server.listen(PORT,()=>console.log('Server port:',PORT));
+
 
 
