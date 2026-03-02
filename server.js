@@ -4,6 +4,16 @@ const {Server}=require('socket.io');
 
 const app=express();
 const server=http.createServer(app);
+
+// CORS middleware - en üstte olmalı
+app.use((req,res,next)=>{
+    res.header('Access-Control-Allow-Origin','*');
+    res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers','*');
+    if(req.method==='OPTIONS')return res.sendStatus(200);
+    next();
+});
+
 const io=new Server(server,{
     cors:{
         origin:'*',
@@ -16,22 +26,6 @@ const io=new Server(server,{
     pingTimeout:4000,
     upgradeTimeout:10000,
     allowEIO3:true
-});
-
-app.use((req,res,next)=>{
-    res.header('Access-Control-Allow-Origin','*');
-    res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers','*');
-    if(req.method==='OPTIONS')return res.sendStatus(200);
-    next();
-});
-
-app.use((req,res,next)=>{
-    res.header('Access-Control-Allow-Origin','*');
-    res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
-    res.header('Access-Control-Allow-Headers','*');
-    if(req.method==='OPTIONS')return res.sendStatus(200);
-    next();
 });
 
 app.get('/',(req,res)=>res.send('HaxBall Server Çalışıyor!'));
@@ -50,23 +44,22 @@ const MAPS={
 // ================================================
 // FİZİK SABİTLERİ
 // ================================================
-const PR=19;      // Oyuncu yarıçapı
-const BR=11;      // Top yarıçapı
-const PSR=4;      // Kale direği yarıçapı
-const KF=7;       // Normal vuruş kuvveti
-const PKF=22;     // Power shot kuvveti
-const PSP=7;      // Pas hızı
-const PA=.28;     // Oyuncu ivmesi
-const PMS=2.8;    // Max oyuncu hızı
-const BMS=14;     // Max top hızı
-const BD=.62;     // Sekme azalması
-const PBD=.24;    // Oyuncu-oyuncu çarpışma
-const BPF=.35;    // Top itme kuvveti
-const RCF=8;      // Recoil kuvveti
+const PR=19;
+const BR=11;
+const PSR=4;
+const KF=7;
+const PKF=22;
+const PSP=7;
+const PA=.28;
+const PMS=2.8;
+const BMS=14;
+const BD=.62;
+const PBD=.24;
+const BPF=.35;
+const RCF=18;
 const KICK_HOLD_MAX=60;
-const PCD=2700;   // Power cooldown (frame)
+const PCD=2700;
 const FDT=1000/60;
-const MDR=180;    // Max maç süresi (saniye)
 
 // ================================================
 // YARDIMCI FONKSİYONLAR
@@ -82,7 +75,7 @@ function nrm(x,y){
 }
 
 // ================================================
-// MEVKİ / TAKIM
+// MEVKİ / TAKIM YARDIMCILARI
 // ================================================
 function slotCfg(ts){
     if(ts<=0)return{GK:0,DEF:0,MID:0,FWD:0};
@@ -126,7 +119,7 @@ function spPos(team,pos,idx,tot,m){
         else if(pos==='DEF')bx=m.fw*.18;
         else if(pos==='MID')bx=m.fw*.34;
         else bx=m.fw*.45;
-    } else {
+    }else{
         if(pos==='GK')bx=m.fw-50;
         else if(pos==='DEF')bx=m.fw*.82;
         else if(pos==='MID')bx=m.fw*.66;
@@ -144,7 +137,11 @@ const rooms={};
 function createRoom(code,hostId,mapKey,goalLimit,password){
     const m=MAPS[mapKey]||MAPS.classic;
     rooms[code]={
-        code,hostId,mapKey,goalLimit,password,
+        code,
+        hostId,
+        mapKey,
+        goalLimit:goalLimit||5,
+        password:password||'',
         players:{},
         state:'lobby',
         ball:{x:m.fw/2,y:m.fh/2,vx:0,vy:0,fire:false,ft:0},
@@ -156,41 +153,23 @@ function createRoom(code,hostId,mapKey,goalLimit,password){
     return rooms[code];
 }
 
-// ================================================
-// OYUN DÖNGÜSÜ
-// ================================================
-function startGameLoop(code){
+function getLobbyData(code){
     const room=rooms[code];
-    if(!room)return;
-    stopGameLoop(code);
-    let physicsTick=0;
-room.gameLoop=setInterval(()=>{
-    if(!rooms[code]){
-        clearInterval(room.gameLoop);
-        return;
+    if(!room)return null;
+    const pOut={};
+    for(const[id,p] of Object.entries(room.players)){
+        if(p.online===false)continue;
+        pOut[id]={name:p.name,team:p.team,pos:p.pos||''};
     }
-    // Fizik her frame
-    hostPhysics(code);
-    physicsTick++;
-    // State her 2 framede bir (30fps) - bant genişliği tasarrufu
-    if(physicsTick%2===0){
-        const state=buildState(code);
-        if(state)io.to(code).emit('state',state);
-    }
-},FDT);
+    return{
+        players:pOut,
+        hostId:room.hostId,
+        mapKey:room.mapKey,
+        goalLimit:room.goalLimit,
+        state:room.state
+    };
 }
 
-function stopGameLoop(code){
-    const room=rooms[code];
-    if(room&&room.gameLoop){
-        clearInterval(room.gameLoop);
-        room.gameLoop=null;
-    }
-}
-
-// ================================================
-// STATE OLUŞTUR
-// ================================================
 function buildState(code){
     const room=rooms[code];
     if(!room)return null;
@@ -224,10 +203,125 @@ function buildState(code){
 }
 
 // ================================================
-// ANA FİZİK (SUNUCUDA ÇALIŞIR)
+// OYUN DÖNGÜSÜ
 // ================================================
-function hostPhysics(code){
-    const room=rooms[code];
+function startGameLoop(roomCode){
+    const room=rooms[roomCode];
+    if(!room)return;
+    stopGameLoop(roomCode);
+    room.gameLoop=setInterval(()=>{
+        if(!rooms[roomCode]){
+            clearInterval(room.gameLoop);
+            return;
+        }
+        hostPhysics(roomCode);
+        const state=buildState(roomCode);
+        if(state)io.to(roomCode).emit('state',state);
+    },FDT);
+}
+
+function stopGameLoop(roomCode){
+    const room=rooms[roomCode];
+    if(room&&room.gameLoop){
+        clearInterval(room.gameLoop);
+        room.gameLoop=null;
+    }
+}
+
+// ================================================
+// RESET POZİSYONLAR
+// ================================================
+function resetPositions(roomCode){
+    const room=rooms[roomCode];
+    if(!room)return;
+    const m=MAPS[room.mapKey]||MAPS.classic;
+    room.ball.x=m.fw/2;room.ball.y=m.fh/2;
+    room.ball.vx=0;room.ball.vy=0;
+    room.ball.fire=false;room.ball.ft=0;
+    const rP=[],bP=[];
+    for(const[id,p] of Object.entries(room.players)){
+        if(p.online===false)continue;
+        if(p.team==='red')rP.push(id);
+        else if(p.team==='blue')bP.push(id);
+    }
+    spawnGroup(roomCode,rP,'red');
+    spawnGroup(roomCode,bP,'blue');
+}
+
+function spawnGroup(roomCode,pids,team){
+    const room=rooms[roomCode];
+    if(!room)return;
+    const m=MAPS[room.mapKey]||MAPS.classic;
+    const g={GK:[],DEF:[],MID:[],FWD:[]};
+    for(const id of pids){
+        const pos=room.players[id]?room.players[id].pos||'MID':'MID';
+        if(!g[pos])g[pos]=[];
+        g[pos].push(id);
+    }
+    for(const[pos,arr] of Object.entries(g)){
+        for(let j=0;j<arr.length;j++){
+            const s=spPos(team,pos,j,arr.length,m);
+            const p=room.players[arr[j]];
+            if(p){p.x=s.x;p.y=s.y;p.vx=0;p.vy=0;p.kickHeld=0;}
+        }
+    }
+}
+
+function findMate(roomCode,pid){
+    const room=rooms[roomCode];
+    if(!room)return null;
+    const me=room.players[pid];
+    if(!me)return null;
+    let best=null,bd=1e9;
+    for(const[id,p] of Object.entries(room.players)){
+        if(id===pid||p.team!==me.team||p.team==='spectator'||p.online===false)continue;
+        const d=dst(me.x,me.y,p.x,p.y);
+        if(d<bd){bd=d;best=p;}
+    }
+    return best;
+}
+
+// ================================================
+// GOL
+// ================================================
+function handleGoal(roomCode,team){
+    const room=rooms[roomCode];
+    if(!room||room.goalFreeze)return;
+    if(team==='red')room.match.redScore++;
+    else room.match.blueScore++;
+    room.goalFreeze=true;
+    room.goalTimer=1800;
+    room.ball.vx=0;room.ball.vy=0;
+    room.ball.fire=false;room.ball.ft=0;
+    for(const p of Object.values(room.players)){
+        p.vx=0;p.vy=0;p.kickHeld=0;
+    }
+    io.to(roomCode).emit('goal',{
+        team,
+        redScore:room.match.redScore,
+        blueScore:room.match.blueScore
+    });
+    const gl=room.goalLimit;
+    if(gl>0&&(room.match.redScore>=gl||room.match.blueScore>=gl)){
+        setTimeout(()=>{
+            if(!rooms[roomCode])return;
+            room.match.running=false;
+            stopGameLoop(roomCode);
+            io.to(roomCode).emit('matchEnd',{
+                reason:'goal',
+                winner:team,
+                redScore:room.match.redScore,
+                blueScore:room.match.blueScore
+            });
+        },1800+200);
+    }
+}
+
+// ================================================
+// ANA FİZİK
+// ================================================
+function hostPhysics(roomCode){
+    const room=rooms[roomCode];
     if(!room)return;
 
     const m=MAPS[room.mapKey]||MAPS.classic;
@@ -238,18 +332,9 @@ function hostPhysics(code){
     const match=room.match;
     const B=room.ball;
 
-    // Süre sayacı
+    // Süre ileri sayar - sınır yok
     if(match.running&&!match.paused&&!room.goalFreeze){
         match.time+=dtS;
-        if(match.time>=MDR){
-            match.running=false;
-            match.time=MDR;
-            io.to(code).emit('matchEnd',{
-                reason:'time',
-                redScore:match.redScore,
-                blueScore:match.blueScore
-            });
-        }
     }
 
     // Gol dondurma
@@ -257,8 +342,8 @@ function hostPhysics(code){
         room.goalTimer-=FDT;
         if(room.goalTimer<=0){
             room.goalFreeze=false;
-                    resetPositions(code);
-            io.to(code).emit('resetPositions',buildState(code));
+            resetPositions(roomCode);
+            io.to(roomCode).emit('resetPositions',buildState(roomCode));
         }
         return;
     }
@@ -274,11 +359,12 @@ function hostPhysics(code){
     for(const[,pp] of acts){
         // Recoil
         if(pp.rcT>0){
-            pp.x+=pp.rcVx;pp.y+=pp.rcVy;
-            pp.rcVx*=.85;pp.rcVy*=.85;
+            pp.x+=pp.rcVx;
+            pp.y+=pp.rcVy;
+            pp.rcVx*=.85;
+            pp.rcVy*=.85;
             pp.rcT--;
         }
-
         // Hareket
         const inL=Math.sqrt(pp.iDx*pp.iDx+pp.iDy*pp.iDy);
         if(inL>.05){
@@ -286,51 +372,41 @@ function hostPhysics(code){
             pp.vx+=nm.x*PA*Math.min(inL,1);
             pp.vy+=nm.y*PA*Math.min(inL,1);
         }
-
         // Hız limiti
         const spd=Math.sqrt(pp.vx*pp.vx+pp.vy*pp.vy);
-        if(spd>PMS){pp.vx=(pp.vx/spd)*PMS;pp.vy=(pp.vy/spd)*PMS}
-
+        if(spd>PMS){pp.vx=(pp.vx/spd)*PMS;pp.vy=(pp.vy/spd)*PMS;}
         // Sürtünme
         pp.vx*=pf;pp.vy*=pf;
         if(Math.abs(pp.vx)<.003)pp.vx=0;
         if(Math.abs(pp.vy)<.003)pp.vy=0;
-
-        // Pozisyon güncelle
+        // Pozisyon
         pp.x+=pp.vx;pp.y+=pp.vy;
-
-        // Vuruş sayacı
+        // Vuruş
         if(pp.iK){
             if(pp.kickHeld<KICK_HOLD_MAX)pp.kickHeld++;
             pp.kick=true;
-        } else {
+        }else{
             pp.kickHeld=0;pp.kick=false;
         }
-
         // Cooldown
         if(pp.pCD>0)pp.pCD--;
 
-        // ---- SINIRLAR (Kale içine girebilir) ----
-        // Üst/alt duvar
+        // ---- SINIRLAR ----
         if(pp.y<PR){pp.y=PR;pp.vy=0;}
         if(pp.y>FH-PR){pp.y=FH-PR;pp.vy=0;}
-
-        // Sol duvar
+        // Sol
         if(pp.x<PR){
             if(pp.y>gT&&pp.y<gB){
-                // Sol kale içinde - arka duvara kadar gidebilir
                 if(pp.x<-GD+PR)pp.x=-GD+PR;
-            } else {
+            }else{
                 pp.x=PR;pp.vx=0;
             }
         }
-
-        // Sağ duvar
+        // Sağ
         if(pp.x>FW-PR){
             if(pp.y>gT&&pp.y<gB){
-                // Sağ kale içinde
                 if(pp.x>FW+GD-PR)pp.x=FW+GD-PR;
-            } else {
+            }else{
                 pp.x=FW-PR;pp.vx=0;
             }
         }
@@ -362,16 +438,10 @@ function hostPhysics(code){
 
     // ---- TOP FİZİĞİ ----
     if(B.ft>0){B.ft--;if(B.ft<=0)B.fire=false;}
-
-    // Top sürtünmesi
     B.vx*=bf;B.vy*=bf;
     if(Math.abs(B.vx)<.004)B.vx=0;
     if(Math.abs(B.vy)<.004)B.vy=0;
-
-    // Top hareketi
     B.x+=B.vx;B.y+=B.vy;
-
-    // Max top hızı
     const bsp=Math.sqrt(B.vx*B.vx+B.vy*B.vy);
     const maxB=B.fire?BMS*2:BMS;
     if(bsp>maxB){B.vx=(B.vx/bsp)*maxB;B.vy=(B.vy/bsp)*maxB;}
@@ -379,27 +449,20 @@ function hostPhysics(code){
     // ---- OYUNCU-TOP ÇARPIŞMA ----
     for(const[pid,bp] of acts){
         const bd=dst(bp.x,bp.y,B.x,B.y);
-        // Temas mesafesi: oyuncu yarıçapı + top yarıçapı
         const touchRange=PR+BR;
-        // Vuruş mesafesi: biraz daha fazla (kick aktifken)
         const kickRange=PR+BR+(bp.kick?4:0);
-
         if(bd<kickRange&&bd>.001){
             const bnx=(B.x-bp.x)/bd;
             const bny=(B.y-bp.y)/bd;
-
             // Çakışma düzelt
             if(bd<touchRange){
                 const bov=touchRange-bd;
                 B.x+=bnx*bov;
                 B.y+=bny*bov;
             }
-
-            // Göreceli hız
             const bdvx=B.vx-bp.vx;
             const bdvy=B.vy-bp.vy;
             const bdvn=bdvx*bnx+bdvy*bny;
-
             if(bp.kick){
                 // POWER SHOT
                 if(bp.iPw&&bp.pCD<=0){
@@ -409,18 +472,18 @@ function hostPhysics(code){
                     B.vy=bny*pwF;
                     B.fire=true;B.ft=120;
                     bp.pCD=PCD;bp.iPw=false;
-                    io.to(code).emit('powerShot',{pid});
+                    io.to(roomCode).emit('powerShot',{pid});
                 }
                 // PAS
                 else if(bp.iP){
-                    const mate=findMate(code,pid);
+                    const mate=findMate(roomCode,pid);
                     if(mate){
                         const dx=mate.x-B.x;
                         const dy=mate.y-B.y;
                         const dn=nrm(dx,dy);
-                        B.vx=dn.x*PSP;B.vy=dn.y*PSP;
-                    } else {
-                        // Takım arkadaşı yoksa normal vur
+                        B.vx=dn.x*PSP;
+                        B.vy=dn.y*PSP;
+                    }else{
                         if(bdvn<KF){
                             const addF=KF-Math.max(bdvn,0);
                             B.vx+=bnx*addF;B.vy+=bny*addF;
@@ -434,22 +497,26 @@ function hostPhysics(code){
                         B.vx+=bnx*addF;B.vy+=bny*addF;
                     }
                 }
-            } else {
-                // Kick yok - sadece fizik çarpışması
+            }else{
                 if(bdvn<0){
                     B.vx-=bdvn*bnx*BPF;
                     B.vy-=bdvn*bny*BPF;
                 }
             }
-
-            // Ateş topu recoil
+            // Sert şut recoil
             if(B.fire&&bdvn<0){
                 const bspd2=Math.sqrt(B.vx*B.vx+B.vy*B.vy);
-                if(bspd2>6){
+                if(bspd2>4){
                     bp.rcVx=-bnx*RCF;
                     bp.rcVy=-bny*RCF;
-                    bp.rcT=10;
+                    bp.rcT=18;
                 }
+            }
+            // Normal hızlı toptan da recoil
+            if(!B.fire&&bdvn<-8){
+                bp.rcVx=-bnx*RCF*.5;
+                bp.rcVy=-bny*RCF*.5;
+                bp.rcT=8;
             }
         }
     }
@@ -474,126 +541,31 @@ function hostPhysics(code){
         }
     }
 
-    // ---- TOP SINIR VE GOL ----
-    // Üst/alt duvar
+    // ---- SINIRLAR VE GOL ----
     if(B.y-BR<0){B.y=BR;if(B.vy<0)B.vy=-B.vy*BD;}
     if(B.y+BR>FH){B.y=FH-BR;if(B.vy>0)B.vy=-B.vy*BD;}
-
-    // Sol duvar
+    // Sol
     if(B.x-BR<0){
         if(B.y>gT&&B.y<gB){
-            // Kale içinde - gol çizgisi
-            if(B.x-BR<-GD){
-                handleGoal(code,'blue');
-                return;
-            }
-            // Kale içinde sekme (üst/alt)
+            if(B.x-BR<-GD){handleGoal(roomCode,'blue');return;}
             if(B.y-BR<gT){B.y=gT+BR;if(B.vy<0)B.vy=-B.vy*BD;}
             if(B.y+BR>gB){B.y=gB-BR;if(B.vy>0)B.vy=-B.vy*BD;}
-        } else {
+        }else{
             B.x=BR;if(B.vx<0)B.vx=-B.vx*BD;
         }
     }
-
-    // Sağ duvar
+    // Sağ
     if(B.x+BR>FW){
         if(B.y>gT&&B.y<gB){
-            if(B.x+BR>FW+GD){
-                handleGoal(code,'red');
-                return;
-            }
+            if(B.x+BR>FW+GD){handleGoal(roomCode,'red');return;}
             if(B.y-BR<gT){B.y=gT+BR;if(B.vy<0)B.vy=-B.vy*BD;}
             if(B.y+BR>gB){B.y=gB-BR;if(B.vy>0)B.vy=-B.vy*BD;}
-        } else {
+        }else{
             B.x=FW-BR;if(B.vx>0)B.vx=-B.vx*BD;
         }
     }
-
-    // Kale arka duvarı (extra güvenlik)
     if(B.x<-GD){B.x=-GD+BR;B.vx=Math.abs(B.vx)*BD;}
     if(B.x>FW+GD){B.x=FW+GD-BR;B.vx=-Math.abs(B.vx)*BD;}
-}
-
-// ------------------------------------------------
-function handleGoal(code,team){
-    const room=rooms[code];
-    if(!room||room.goalFreeze)return;
-    if(team==='red')room.match.redScore++;
-    else room.match.blueScore++;
-    room.goalFreeze=true;
-    room.goalTimer=1800; // 30 saniye * 60fps
-    room.ball.vx=0;room.ball.vy=0;
-    room.ball.fire=false;room.ball.ft=0;
-    for(const p of Object.values(room.players)){
-        p.vx=0;p.vy=0;p.kickHeld=0;
-    }
-    io.to(code).emit('goal',{
-        team,
-        redScore:room.match.redScore,
-        blueScore:room.match.blueScore
-    });
-    const{goalLimit}=room;
-    if(goalLimit>0&&(room.match.redScore>=goalLimit||room.match.blueScore>=goalLimit)){
-        setTimeout(()=>{
-            if(!rooms[code])return;
-            room.match.running=false;
-            io.to(code).emit('matchEnd',{
-                reason:'goal',
-                winner:team,
-                redScore:room.match.redScore,
-                blueScore:room.match.blueScore
-            });
-        },1800+200);
-    }
-}
-
-function resetPositions(code){
-    const room=rooms[code];
-    if(!room)return;
-    const m=MAPS[room.mapKey]||MAPS.classic;
-    room.ball.x=m.fw/2;room.ball.y=m.fh/2;
-    room.ball.vx=0;room.ball.vy=0;
-    room.ball.fire=false;room.ball.ft=0;
-    const rP=[],bP=[];
-    for(const[id,p] of Object.entries(room.players)){
-        if(p.online===false)continue;
-        if(p.team==='red')rP.push(id);
-        else if(p.team==='blue')bP.push(id);
-    }
-    spawnGroup(code,rP,'red');
-    spawnGroup(code,bP,'blue');
-}
-
-function spawnGroup(code,pids,team){
-    const room=rooms[code];
-    const m=MAPS[room.mapKey]||MAPS.classic;
-    const g={GK:[],DEF:[],MID:[],FWD:[]};
-    for(const id of pids){
-        const pos=room.players[id].pos||'MID';
-        if(!g[pos])g[pos]=[];
-        g[pos].push(id);
-    }
-    for(const[pos,arr] of Object.entries(g)){
-        for(let j=0;j<arr.length;j++){
-            const s=spPos(team,pos,j,arr.length,m);
-            const p=room.players[arr[j]];
-            p.x=s.x;p.y=s.y;p.vx=0;p.vy=0;p.kickHeld=0;
-        }
-    }
-}
-
-function findMate(code,pid){
-    const room=rooms[code];
-    if(!room)return null;
-    const me=room.players[pid];
-    if(!me)return null;
-    let best=null,bd=1e9;
-    for(const[id,p] of Object.entries(room.players)){
-        if(id===pid||p.team!==me.team||p.team==='spectator'||p.online===false)continue;
-        const d=dst(me.x,me.y,p.x,p.y);
-        if(d<bd){bd=d;best=p;}
-    }
-    return best;
 }
 
 // ================================================
@@ -602,14 +574,13 @@ function findMate(code,pid){
 io.on('connection',(socket)=>{
     console.log('Bağlandı:',socket.id);
 
-    // Ping
     socket.on('ping_custom',()=>socket.emit('pong_custom'));
 
     // ODA KUR
     socket.on('createRoom',(data,cb)=>{
         const{code,playerName,mapKey,goalLimit,password}=data;
-        if(rooms[code]){cb({error:'Kod zaten var'});return;}
-        const room=createRoom(code,socket.id,mapKey||'classic',goalLimit||0,password||'');
+        if(rooms[code]){if(cb)cb({error:'Kod zaten var'});return;}
+        const room=createRoom(code,socket.id,mapKey||'classic',goalLimit||5,password||'');
         const m=MAPS[room.mapKey]||MAPS.classic;
         room.players[socket.id]={
             id:socket.id,name:playerName||'Oyuncu',
@@ -621,7 +592,7 @@ io.on('connection',(socket)=>{
         };
         socket.join(code);
         socket.roomCode=code;
-        cb({ok:true,code});
+        if(cb)cb({ok:true,code});
         io.to(code).emit('lobbyUpdate',getLobbyData(code));
     });
 
@@ -629,11 +600,8 @@ io.on('connection',(socket)=>{
     socket.on('joinRoom',(data,cb)=>{
         const{code,playerName,password}=data;
         const room=rooms[code];
-        if(!room){cb({error:'Oda bulunamadı'});return;}
-        if(room.password&&room.password!==password){cb({error:'Yanlış şifre'});return;}
-        if(room.state==='playing'){
-            // Oyun devam ediyorsa izleyici olarak ekle
-        }
+        if(!room){if(cb)cb({error:'Oda bulunamadı'});return;}
+        if(room.password&&room.password!==password){if(cb)cb({error:'Yanlış şifre'});return;}
         const m=MAPS[room.mapKey]||MAPS.classic;
         room.players[socket.id]={
             id:socket.id,name:playerName||'Oyuncu',
@@ -645,7 +613,7 @@ io.on('connection',(socket)=>{
         };
         socket.join(code);
         socket.roomCode=code;
-        cb({ok:true,code,mapKey:room.mapKey,goalLimit:room.goalLimit,hostId:room.hostId});
+        if(cb)cb({ok:true,code,mapKey:room.mapKey,goalLimit:room.goalLimit,hostId:room.hostId});
         io.to(code).emit('lobbyUpdate',getLobbyData(code));
     });
 
@@ -657,7 +625,7 @@ io.on('connection',(socket)=>{
         if(!p)return;
         if(data.team==='spectator'){
             p.team='spectator';p.pos='';
-        } else {
+        }else{
             if(tmSz(room.players,data.team)>=11)return;
             p.team=data.team;
             p.pos=aPos(room.players,data.team,socket.id);
@@ -678,6 +646,14 @@ io.on('connection',(socket)=>{
         }
     });
 
+    // GOL SINIRI DEĞİŞTİR (sadece host)
+    socket.on('changeGoalLimit',(data)=>{
+        const room=rooms[socket.roomCode];
+        if(!room||room.hostId!==socket.id)return;
+        room.goalLimit=parseInt(data.goalLimit)||0;
+        io.to(socket.roomCode).emit('goalLimitChanged',{goalLimit:room.goalLimit});
+    });
+
     // ADMIN TAKIM DEĞİŞTİR
     socket.on('adminChangeTeam',(data)=>{
         const room=rooms[socket.roomCode];
@@ -695,7 +671,8 @@ io.on('connection',(socket)=>{
 
     // OYUNU BAŞLAT
     socket.on('startGame',(cb)=>{
-        const room=rooms[socket.roomCode];
+        const roomCode=socket.roomCode;
+        const room=rooms[roomCode];
         if(!room||room.hostId!==socket.id){if(cb)cb({error:'Yetkisiz'});return;}
         const ps=room.players;
         let rc=0,bc=0;
@@ -717,12 +694,12 @@ io.on('connection',(socket)=>{
         room.goalFreeze=false;room.goalTimer=0;
         const m=MAPS[room.mapKey]||MAPS.classic;
         room.ball={x:m.fw/2,y:m.fh/2,vx:0,vy:0,fire:false,ft:0};
-        resetPositions(socket.roomCode);
-startGameLoop(socket.roomCode);
-        io.to(socket.roomCode).emit('gameStart',{
+        resetPositions(roomCode);
+        startGameLoop(roomCode);
+        io.to(roomCode).emit('gameStart',{
             mapKey:room.mapKey,
             goalLimit:room.goalLimit,
-            players:getLobbyData(socket.roomCode).players
+            players:getLobbyData(roomCode).players
         });
         if(cb)cb({ok:true});
     });
@@ -757,7 +734,7 @@ startGameLoop(socket.roomCode);
         io.to(socket.roomCode).emit('emoji',{pid:socket.id,emoji:data.emoji});
     });
 
-    // ADMIN PANELİ
+    // ADMIN DURAKSAT
     socket.on('adminPause',()=>{
         const room=rooms[socket.roomCode];
         if(!room||room.hostId!==socket.id)return;
@@ -765,15 +742,19 @@ startGameLoop(socket.roomCode);
         io.to(socket.roomCode).emit('paused',room.match.paused);
     });
 
+    // ADMIN SIFIRLA
     socket.on('adminReset',()=>{
         const room=rooms[socket.roomCode];
         if(!room||room.hostId!==socket.id)return;
-        room.match.redScore=0;room.match.blueScore=0;room.match.time=0;
+        room.match.redScore=0;
+        room.match.blueScore=0;
+        room.match.time=0;
         room.goalFreeze=false;
         resetPositions(socket.roomCode);
         io.to(socket.roomCode).emit('adminReset',buildState(socket.roomCode));
     });
 
+    // ADMIN LOBİ
     socket.on('adminLobby',()=>{
         const room=rooms[socket.roomCode];
         if(!room||room.hostId!==socket.id)return;
@@ -784,6 +765,7 @@ startGameLoop(socket.roomCode);
         io.to(socket.roomCode).emit('backToLobby');
     });
 
+    // ADMIN HARİTA DEĞİŞTİR
     socket.on('adminChangeMap',(data)=>{
         const room=rooms[socket.roomCode];
         if(!room||room.hostId!==socket.id)return;
@@ -798,6 +780,7 @@ startGameLoop(socket.roomCode);
         });
     });
 
+    // ADMIN KICK
     socket.on('adminKick',(data)=>{
         const room=rooms[socket.roomCode];
         if(!room||room.hostId!==socket.id)return;
@@ -844,29 +827,13 @@ function handleLeave(socket){
     io.to(code).emit('lobbyUpdate',getLobbyData(code));
 }
 
-function getLobbyData(code){
-    const room=rooms[code];
-    if(!room)return null;
-    const pOut={};
-    for(const[id,p] of Object.entries(room.players)){
-        if(p.online===false)continue;
-        pOut[id]={name:p.name,team:p.team,pos:p.pos||''};
-    }
-    return{
-        players:pOut,
-        hostId:room.hostId,
-        mapKey:room.mapKey,
-        goalLimit:room.goalLimit,
-        state:room.state
-    };
-}
+// Hata yakalama
+process.on('uncaughtException',(err)=>{
+    console.error('Hata:',err.message);
+});
+process.on('unhandledRejection',(err)=>{
+    console.error('Promise Hata:',err);
+});
 
-// ================================================
-// SUNUCU BAŞLAT
-// ================================================
 const PORT=process.env.PORT||3000;
 server.listen(PORT,()=>console.log('HaxBall Server port:',PORT));
-
-
-
-
