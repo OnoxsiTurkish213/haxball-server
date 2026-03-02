@@ -5,9 +5,25 @@ const {Server}=require('socket.io');
 const app=express();
 const server=http.createServer(app);
 const io=new Server(server,{
-    cors:{origin:'*',methods:['GET','POST']},
+    cors:{
+        origin:'*',
+        methods:['GET','POST'],
+        allowedHeaders:['*'],
+        credentials:false
+    },
+    transports:['websocket','polling'],
     pingInterval:8000,
-    pingTimeout:4000
+    pingTimeout:4000,
+    upgradeTimeout:10000,
+    allowEIO3:true
+});
+
+app.use((req,res,next)=>{
+    res.header('Access-Control-Allow-Origin','*');
+    res.header('Access-Control-Allow-Methods','GET,POST,OPTIONS');
+    res.header('Access-Control-Allow-Headers','*');
+    if(req.method==='OPTIONS')return res.sendStatus(200);
+    next();
 });
 
 app.get('/',(req,res)=>res.send('HaxBall Server Çalışıyor!'));
@@ -233,7 +249,7 @@ function hostPhysics(code){
         room.goalTimer-=FDT;
         if(room.goalTimer<=0){
             room.goalFreeze=false;
-                    resetPositions(socket.roomCode);
+                    resetPositions(code);
             io.to(code).emit('resetPositions',buildState(code));
         }
         return;
@@ -693,7 +709,7 @@ io.on('connection',(socket)=>{
         room.goalFreeze=false;room.goalTimer=0;
         const m=MAPS[room.mapKey]||MAPS.classic;
         room.ball={x:m.fw/2,y:m.fh/2,vx:0,vy:0,fire:false,ft:0};
-        resetPositions(socket.roomCode);
+        resetPositions(code);
 startGameLoop(socket.roomCode);
         io.to(socket.roomCode).emit('gameStart',{
             mapKey:room.mapKey,
@@ -842,5 +858,6 @@ function getLobbyData(code){
 // ================================================
 const PORT=process.env.PORT||3000;
 server.listen(PORT,()=>console.log('HaxBall Server port:',PORT));
+
 
 
