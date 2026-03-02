@@ -544,20 +544,20 @@ function hostPhysics(roomCode){
     // ---- SINIRLAR VE GOL ----
     if(B.y-BR<0){B.y=BR;if(B.vy<0)B.vy=-B.vy*BD;}
     if(B.y+BR>FH){B.y=FH-BR;if(B.vy>0)B.vy=-B.vy*BD;}
-    // Sol
+        // Sol
     if(B.x-BR<0){
         if(B.y>gT&&B.y<gB){
-            if(B.x-BR<-GD){handleGoal(roomCode,'blue');return;}
+            if(B.x<-GD*0.7){handleGoal(roomCode,'blue');return;}
             if(B.y-BR<gT){B.y=gT+BR;if(B.vy<0)B.vy=-B.vy*BD;}
             if(B.y+BR>gB){B.y=gB-BR;if(B.vy>0)B.vy=-B.vy*BD;}
         }else{
             B.x=BR;if(B.vx<0)B.vx=-B.vx*BD;
         }
     }
-    // Sağ
+        // Sağ
     if(B.x+BR>FW){
         if(B.y>gT&&B.y<gB){
-            if(B.x+BR>FW+GD){handleGoal(roomCode,'red');return;}
+            if(B.x>FW+GD*0.7){handleGoal(roomCode,'red');return;}
             if(B.y-BR<gT){B.y=gT+BR;if(B.vy<0)B.vy=-B.vy*BD;}
             if(B.y+BR>gB){B.y=gB-BR;if(B.vy>0)B.vy=-B.vy*BD;}
         }else{
@@ -837,3 +837,4 @@ process.on('unhandledRejection',(err)=>{
 
 const PORT=process.env.PORT||3000;
 server.listen(PORT,()=>console.log('HaxBall Server port:',PORT));
+
