@@ -687,8 +687,8 @@ io.on('connection',(socket)=>{
         room.goalFreeze=false;room.goalTimer=0;
         const m=MAPS[room.mapKey]||MAPS.classic;
         room.ball={x:m.fw/2,y:m.fh/2,vx:0,vy:0,fire:false,ft:0};
-        resetPositions(code);
-        startGameLoop(socket.roomCode);
+        resetPositions(socket.roomCode);
+startGameLoop(socket.roomCode);
         io.to(socket.roomCode).emit('gameStart',{
             mapKey:room.mapKey,
             goalLimit:room.goalLimit,
@@ -836,3 +836,4 @@ function getLobbyData(code){
 // ================================================
 const PORT=process.env.PORT||3000;
 server.listen(PORT,()=>console.log('HaxBall Server port:',PORT));
+
