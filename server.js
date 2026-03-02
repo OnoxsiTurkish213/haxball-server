@@ -139,15 +139,21 @@ function startGameLoop(code){
     const room=rooms[code];
     if(!room)return;
     stopGameLoop(code);
-    room.gameLoop=setInterval(()=>{
-        if(!rooms[code]){
-            clearInterval(room.gameLoop);
-            return;
-        }
-        hostPhysics(code);
+    let physicsTick=0;
+room.gameLoop=setInterval(()=>{
+    if(!rooms[code]){
+        clearInterval(room.gameLoop);
+        return;
+    }
+    // Fizik her frame
+    hostPhysics(code);
+    physicsTick++;
+    // State her 2 framede bir (30fps) - bant genişliği tasarrufu
+    if(physicsTick%2===0){
         const state=buildState(code);
         if(state)io.to(code).emit('state',state);
-    },FDT);
+    }
+},FDT);
 }
 
 function stopGameLoop(code){
@@ -836,4 +842,5 @@ function getLobbyData(code){
 // ================================================
 const PORT=process.env.PORT||3000;
 server.listen(PORT,()=>console.log('HaxBall Server port:',PORT));
+
 
