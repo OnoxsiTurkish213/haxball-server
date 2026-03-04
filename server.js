@@ -543,11 +543,11 @@ io.on('connection', (socket) => {
         const room = rooms[code];
         if (!room) { if (cb) cb({ error: 'Oda bulunamadı' }); return; }
         if (room.password && room.password !== password) { if (cb) cb({ error: 'Yanlış şifre' }); return; }
-        if (room.state === 'playing') { if (cb) cb({ error: 'Oyun devam ediyor' }); return; }
+        // Oyun sırasında katılma: izleyici olarak eklenir, admin takıma alabilir
         const m = MAPS[room.mapKey] || MAPS.classic;
         room.players[socket.id] = makePlayer(socket.id, playerName || 'Oyuncu', m);
         socket.join(code); socket.roomCode = code;
-        if (cb) cb({ ok: true, code, mapKey: room.mapKey, goalLimit: room.goalLimit, hostId: room.hostId });
+        if (cb) cb({ ok: true, code, mapKey: room.mapKey, goalLimit: room.goalLimit, hostId: room.hostId, state: room.state });
         io.to(code).emit('lobbyUpdate', getLobbyData(code));
     });
 
@@ -587,7 +587,14 @@ io.on('connection', (socket) => {
         if (data.team === 'spectator') { p.team = 'spectator'; p.pos = ''; }
         else {
             if (tmSz(room.players, data.team) >= 11) return;
-            p.team = data.team; p.pos = aPos(room.players, data.team, data.pid);
+            p.team = data.team;
+            p.pos  = aPos(room.players, data.team, data.pid);
+            // Oyun sırasında takıma alındıysa pozisyon ata
+            if (room.state === 'playing') {
+                const m = MAPS[room.mapKey] || MAPS.classic;
+                const s = spPos(data.team, p.pos, 0, 1, m);
+                p.x = s.x; p.y = s.y; p.vx = 0; p.vy = 0;
+            }
         }
         io.to(socket.roomCode).emit('lobbyUpdate', getLobbyData(socket.roomCode));
     });
